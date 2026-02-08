@@ -1338,6 +1338,8 @@ pub(crate) struct DispatchEventResult {
 pub struct ContentMask<P: Clone + Debug + Default + PartialEq> {
     /// The bounds
     pub bounds: Bounds<P>,
+    /// Edge fade distances. `0` means no fade for that edge.
+    pub fade_out: Edges<P>,
 }
 
 impl ContentMask<Pixels> {
@@ -1345,13 +1347,20 @@ impl ContentMask<Pixels> {
     pub fn scale(&self, factor: f32) -> ContentMask<ScaledPixels> {
         ContentMask {
             bounds: self.bounds.scale(factor),
+            fade_out: self.fade_out.scale(factor),
         }
     }
 
     /// Intersect the content mask with the given content mask.
     pub fn intersect(&self, other: &Self) -> Self {
         let bounds = self.bounds.intersect(&other.bounds);
-        ContentMask { bounds }
+        let fade_out = Edges {
+            top: self.fade_out.top.max(other.fade_out.top),
+            right: self.fade_out.right.max(other.fade_out.right),
+            bottom: self.fade_out.bottom.max(other.fade_out.bottom),
+            left: self.fade_out.left.max(other.fade_out.left),
+        };
+        ContentMask { bounds, fade_out }
     }
 }
 
@@ -2652,6 +2661,7 @@ impl Window {
                     origin: Point::default(),
                     size: self.viewport_size,
                 },
+                fade_out: Edges::default(),
             })
     }
 
@@ -5255,7 +5265,6 @@ impl PaintQuad {
             ..self
         }
     }
-
 }
 
 /// Creates a quad with the given parameters.

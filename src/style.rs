@@ -152,6 +152,9 @@ pub struct Style {
     /// How children overflowing their container should affect layout
     #[refineable]
     pub overflow: Point<Overflow>,
+    /// Edge fade distances for overflow masking.
+    #[refineable]
+    pub overflow_fade: Edges<AbsoluteLength>,
     /// How much space (in points) should be reserved for the scrollbars of `Overflow::Scroll` and `Overflow::Auto` nodes.
     pub scrollbar_width: AbsoluteLength,
     /// Whether both x and y axis should be scrollable at the same time.
@@ -598,7 +601,24 @@ impl Style {
                     (false, false) => Bounds::from_corners(min, max),
                 };
 
-                Some(ContentMask { bounds })
+                let mut fade_out = self.overflow_fade.to_pixels(rem_size);
+                if self.overflow.x == Overflow::Visible {
+                    fade_out.left = Pixels::ZERO;
+                    fade_out.right = Pixels::ZERO;
+                }
+                if self.overflow.y == Overflow::Visible {
+                    fade_out.top = Pixels::ZERO;
+                    fade_out.bottom = Pixels::ZERO;
+                }
+
+                let max_x = bounds.size.width.max(Pixels::ZERO);
+                let max_y = bounds.size.height.max(Pixels::ZERO);
+                fade_out.top = fade_out.top.clamp(Pixels::ZERO, max_y);
+                fade_out.right = fade_out.right.clamp(Pixels::ZERO, max_x);
+                fade_out.bottom = fade_out.bottom.clamp(Pixels::ZERO, max_y);
+                fade_out.left = fade_out.left.clamp(Pixels::ZERO, max_x);
+
+                Some(ContentMask { bounds, fade_out })
             }
         }
     }
@@ -693,12 +713,19 @@ impl Style {
             )
             .corner_superellipse(self.smoothness.unwrap_or(0.0));
 
-            window.with_content_mask(Some(ContentMask { bounds: top_bounds }), |window| {
-                window.paint_quad(quad.clone());
-            });
+            window.with_content_mask(
+                Some(ContentMask {
+                    bounds: top_bounds,
+                    ..Default::default()
+                }),
+                |window| {
+                    window.paint_quad(quad.clone());
+                },
+            );
             window.with_content_mask(
                 Some(ContentMask {
                     bounds: right_bounds,
+                    ..Default::default()
                 }),
                 |window| {
                     window.paint_quad(quad.clone());
@@ -707,6 +734,7 @@ impl Style {
             window.with_content_mask(
                 Some(ContentMask {
                     bounds: bottom_bounds,
+                    ..Default::default()
                 }),
                 |window| {
                     window.paint_quad(quad.clone());
@@ -715,6 +743,7 @@ impl Style {
             window.with_content_mask(
                 Some(ContentMask {
                     bounds: left_bounds,
+                    ..Default::default()
                 }),
                 |window| {
                     window.paint_quad(quad);
@@ -744,6 +773,7 @@ impl Default for Style {
                 x: Overflow::Visible,
                 y: Overflow::Visible,
             },
+            overflow_fade: Edges::<AbsoluteLength>::zero(),
             allow_concurrent_scroll: false,
             restrict_scroll_to_axis: false,
             scrollbar_width: AbsoluteLength::default(),
