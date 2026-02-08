@@ -387,7 +387,7 @@ fn quad_sdf_impl(corner_center_to_point: vec2<f32>, corner_radius: f32) -> f32 {
     }
 }
 
-// Squircle SDF: smoothness 0.0 = circle, 0.5 = squircle, 1.0 = square
+// Squircle SDF: smoothness 0.0 = circle, 0.5 = squircle, 1.0 = square.
 fn squircle_sdf(point: vec2<f32>, bounds: Bounds, corner_radii: Corners, smoothness: f32) -> f32 {
     let half_size = bounds.size / 2.0;
     let center = bounds.origin + half_size;
@@ -395,18 +395,14 @@ fn squircle_sdf(point: vec2<f32>, bounds: Bounds, corner_radii: Corners, smoothn
     let corner_radius = pick_corner_radius(center_to_point, corner_radii);
 
     if (corner_radius == 0.0) {
-        // No corner radius, use sharp corners
         let corner_to_point = abs(center_to_point) - half_size;
         return max(corner_to_point.x, corner_to_point.y);
     }
 
-    // Power factor: 2 = circle, 4 = squircle, 8+ = square
+    // Power factor: 2 = circle, 4 = squircle, 8+ = square.
     let p = pow(2.0, 1.0 + smoothness * 2.0);
-
     let corner_to_point = abs(center_to_point) - half_size + corner_radius;
     let corner_max = max(corner_to_point, vec2<f32>(0.0));
-
-    // Superellipse SDF approximation
     let dist = pow(pow(abs(corner_max.x), p) + pow(abs(corner_max.y), p), 1.0 / p);
 
     return dist + min(0.0, max(corner_to_point.x, corner_to_point.y)) - corner_radius;
@@ -667,7 +663,7 @@ fn fs_quad(input: QuadVarying) -> @location(0) vec4<f32> {
     // However, that might negatively impact performance in the case of
     // reasonable sizes for rounded corners.
     if (is_within_inner_straight_border && !is_near_rounded_corner) {
-        return blend_color(background_color, 1.0);
+        return blend_color(background_color, mask_alpha);
     }
 
     // Signed distance of the point to the outside edge of the quad's border. It
@@ -1048,6 +1044,7 @@ struct PathRasterizationVertex {
     st_position: vec2<f32>,
     color: Background,
     bounds: Bounds,
+    content_mask: ContentMask,
 }
 
 var<storage, read> b_path_vertices: array<PathRasterizationVertex>;
@@ -1081,6 +1078,7 @@ fn fs_path_rasterization(input: PathRasterizationVarying) -> @location(0) vec4<f
     }
 
     let v = b_path_vertices[input.vertex_id];
+    let mask_alpha = content_mask_alpha(input.position.xy, v.content_mask);
     let background = v.color;
     let bounds = v.bounds;
 
@@ -1102,7 +1100,7 @@ fn fs_path_rasterization(input: PathRasterizationVarying) -> @location(0) vec4<f
     );
     let color = gradient_color(background, input.position.xy, bounds,
         gradient_color.solid, gradient_color.color0, gradient_color.color1);
-    return vec4<f32>(color.rgb * color.a * alpha, color.a * alpha);
+    return vec4<f32>(color.rgb * color.a * alpha * mask_alpha, color.a * alpha * mask_alpha);
 }
 
 // --- paths --- //
@@ -1307,14 +1305,13 @@ fn fs_poly_sprite(input: PolySpriteVarying) -> @location(0) vec4<f32> {
     }
 
     let sprite = b_poly_sprites[input.sprite_id];
-    let mask_alpha = content_mask_alpha(input.position.xy, sprite.content_mask);
-
     var distance: f32;
     if (sprite.smoothness > 0.0) {
         distance = squircle_sdf(input.position.xy, sprite.bounds, sprite.corner_radii, sprite.smoothness);
     } else {
         distance = quad_sdf(input.position.xy, sprite.bounds, sprite.corner_radii);
     }
+    let mask_alpha = content_mask_alpha(input.position.xy, sprite.content_mask);
 
     var color = sample;
     if ((sprite.grayscale & 0xFFu) != 0u) {

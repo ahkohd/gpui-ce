@@ -326,7 +326,7 @@ float quad_sdf(float2 pt, Bounds bounds, Corners corner_radii) {
     return quad_sdf_impl(corner_center_to_point, corner_radius);
 }
 
-// Squircle SDF: smoothness 0.0 = circle, 0.5 = squircle, 1.0 = square
+// Squircle SDF: smoothness 0.0 = circle, 0.5 = squircle, 1.0 = square.
 float squircle_sdf(float2 pt, Bounds bounds, Corners corner_radii, float smoothness) {
     float2 half_size = bounds.size / 2.;
     float2 center = bounds.origin + half_size;
@@ -334,18 +334,14 @@ float squircle_sdf(float2 pt, Bounds bounds, Corners corner_radii, float smoothn
     float corner_radius = pick_corner_radius(center_to_point, corner_radii);
 
     if (corner_radius == 0.0) {
-        // No corner radius, use sharp corners
         float2 corner_to_point = abs(center_to_point) - half_size;
         return max(corner_to_point.x, corner_to_point.y);
     }
 
-    // Power factor: 2 = circle, 4 = squircle, 8+ = square
+    // Power factor: 2 = circle, 4 = squircle, 8+ = square.
     float p = pow(2.0, 1.0 + smoothness * 2.0);
-
     float2 corner_to_point = abs(center_to_point) - half_size + corner_radius;
     float2 corner_max = max(corner_to_point, float2(0.0, 0.0));
-
-    // Superellipse SDF approximation
     float dist = pow(pow(abs(corner_max.x), p) + pow(abs(corner_max.y), p), 1.0 / p);
 
     return dist + min(0.0, max(corner_to_point.x, corner_to_point.y)) - corner_radius;
@@ -643,7 +639,7 @@ float4 quad_fragment(QuadFragmentInput input): SV_Target {
 
     // Fast path for points that must be part of the background
     if (is_within_inner_straight_border && !is_near_rounded_corner) {
-        return background_color;
+        return background_color * float4(1.0, 1.0, 1.0, mask_alpha);
     }
 
     // Signed distance of the point to the outside edge of the quad's border
@@ -956,6 +952,7 @@ struct PathRasterizationSprite {
     float2 st_position;
     Background color;
     Bounds bounds;
+    ContentMask content_mask;
 };
 
 StructuredBuffer<PathRasterizationSprite> path_rasterization_sprites: register(t1);
@@ -989,6 +986,7 @@ float4 path_rasterization_fragment(PathFragmentInput input): SV_Target {
     float2 dx = ddx(input.st_position);
     float2 dy = ddy(input.st_position);
     PathRasterizationSprite sprite = path_rasterization_sprites[input.vertex_id];
+    float mask_alpha = content_mask_alpha(input.position.xy, sprite.content_mask);
 
     Background background = sprite.color;
     Bounds bounds = sprite.bounds;
@@ -1008,7 +1006,10 @@ float4 path_rasterization_fragment(PathFragmentInput input): SV_Target {
 
     float4 color = gradient_color(background, input.position.xy, bounds,
         gradient.solid, gradient.color0, gradient.color1);
-    return float4(color.rgb * color.a * alpha, alpha * color.a);
+    return float4(
+        color.rgb * color.a * alpha * mask_alpha,
+        alpha * color.a * mask_alpha
+    );
 }
 
 /*
@@ -1239,7 +1240,6 @@ float4 polychrome_sprite_fragment(PolychromeSpriteFragmentInput input): SV_Targe
     PolychromeSprite sprite = poly_sprites[input.sprite_id];
     float mask_alpha = content_mask_alpha(input.position.xy, sprite.content_mask);
     float4 sample = t_sprite.Sample(s_sprite, input.tile_position);
-
     float distance;
     if (sprite.smoothness > 0.0) {
         distance = squircle_sdf(input.position.xy, sprite.bounds, sprite.corner_radii, sprite.smoothness);

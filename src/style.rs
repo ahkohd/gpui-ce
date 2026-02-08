@@ -557,6 +557,9 @@ impl Style {
 
     /// Get the content mask for this element style, based on the given bounds.
     /// If the element does not hide its overflow, this will return `None`.
+    ///
+    /// Note: overflow fade is axis-aligned and evaluated in window space;
+    /// it is not transform-aware.
     pub fn overflow_mask(
         &self,
         bounds: Bounds<Pixels>,
@@ -617,6 +620,21 @@ impl Style {
                 fade_out.right = fade_out.right.clamp(Pixels::ZERO, max_x);
                 fade_out.bottom = fade_out.bottom.clamp(Pixels::ZERO, max_y);
                 fade_out.left = fade_out.left.clamp(Pixels::ZERO, max_x);
+                let normalize_pair = |start: Pixels, end: Pixels, max: Pixels| {
+                    let total = start + end;
+                    if total > max && total > Pixels::ZERO {
+                        let scale = max.0 / total.0;
+                        (start * scale, end * scale)
+                    } else {
+                        (start, end)
+                    }
+                };
+                let (left, right) = normalize_pair(fade_out.left, fade_out.right, max_x);
+                fade_out.left = left;
+                fade_out.right = right;
+                let (top, bottom) = normalize_pair(fade_out.top, fade_out.bottom, max_y);
+                fade_out.top = top;
+                fade_out.bottom = bottom;
 
                 Some(ContentMask { bounds, fade_out })
             }

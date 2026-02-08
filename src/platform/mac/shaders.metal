@@ -821,7 +821,6 @@ fragment float4 polychrome_sprite_fragment(
                                           min_filter::linear);
   float4 sample =
       atlas_texture.sample(atlas_texture_sampler, input.tile_position);
-
   float distance;
   if (sprite.smoothness > 0.0) {
     distance = squircle_sdf(input.position.xy, sprite.bounds, sprite.corner_radii, sprite.smoothness);
@@ -886,6 +885,27 @@ fragment float4 path_rasterization_fragment(
   float2 dy = dfdy(input.st_position);
 
   PathRasterizationVertex v = vertices[input.vertex_id];
+  float mask_alpha = 1.0;
+  if (v.content_mask.fade_out.left > 0.0) {
+    mask_alpha *= saturate(
+      (input.position.x - v.content_mask.bounds.origin.x) /
+      v.content_mask.fade_out.left);
+  }
+  if (v.content_mask.fade_out.right > 0.0) {
+    mask_alpha *= saturate(
+      (v.content_mask.bounds.origin.x + v.content_mask.bounds.size.width - input.position.x) /
+      v.content_mask.fade_out.right);
+  }
+  if (v.content_mask.fade_out.top > 0.0) {
+    mask_alpha *= saturate(
+      (input.position.y - v.content_mask.bounds.origin.y) /
+      v.content_mask.fade_out.top);
+  }
+  if (v.content_mask.fade_out.bottom > 0.0) {
+    mask_alpha *= saturate(
+      (v.content_mask.bounds.origin.y + v.content_mask.bounds.size.height - input.position.y) /
+      v.content_mask.fade_out.bottom);
+  }
   Background background = v.color;
   Bounds_ScaledPixels path_bounds = v.bounds;
   float alpha;
@@ -917,7 +937,10 @@ fragment float4 path_rasterization_fragment(
     gradient_color.color0,
     gradient_color.color1
   );
-  return float4(color.rgb * color.a * alpha, alpha * color.a);
+  return float4(
+    color.rgb * color.a * alpha * mask_alpha,
+    alpha * color.a * mask_alpha
+  );
 }
 
 struct PathSpriteVertexOutput {
@@ -1209,6 +1232,28 @@ float quad_sdf(float2 point, Bounds_ScaledPixels bounds,
     return quad_sdf_impl(corner_center_to_point, corner_radius);
 }
 
+// Squircle SDF: smoothness 0.0 = circle, 0.5 = squircle, 1.0 = square.
+float squircle_sdf(float2 point, Bounds_ScaledPixels bounds,
+                   Corners_ScaledPixels corner_radii, float smoothness) {
+    float2 half_size = float2(bounds.size.width, bounds.size.height) / 2.0;
+    float2 center = float2(bounds.origin.x, bounds.origin.y) + half_size;
+    float2 center_to_point = point - center;
+    float corner_radius = pick_corner_radius(center_to_point, corner_radii);
+
+    if (corner_radius == 0.0) {
+        float2 corner_to_point = fabs(center_to_point) - half_size;
+        return max(corner_to_point.x, corner_to_point.y);
+    }
+
+    // Power factor: 2 = circle, 4 = squircle, 8+ = square.
+    float p = pow(2.0, 1.0 + smoothness * 2.0);
+    float2 corner_to_point = fabs(center_to_point) - half_size + corner_radius;
+    float2 corner_max = max(corner_to_point, float2(0.0));
+    float dist = pow(pow(fabs(corner_max.x), p) + pow(fabs(corner_max.y), p), 1.0 / p);
+
+    return dist + min(0.0, max(corner_to_point.x, corner_to_point.y)) - corner_radius;
+}
+
 // Implementation of quad signed distance field
 float quad_sdf_impl(float2 corner_center_to_point, float corner_radius) {
     if (corner_radius == 0.0) {
@@ -1225,32 +1270,6 @@ float quad_sdf_impl(float2 corner_center_to_point, float corner_radius) {
 
         return signed_distance_to_inset_quad - corner_radius;
     }
-}
-
-// Squircle SDF: smoothness 0.0 = circle, 0.5 = squircle, 1.0 = square
-float squircle_sdf(float2 point, Bounds_ScaledPixels bounds,
-                   Corners_ScaledPixels corner_radii, float smoothness) {
-    float2 half_size = float2(bounds.size.width, bounds.size.height) / 2.0;
-    float2 center = float2(bounds.origin.x, bounds.origin.y) + half_size;
-    float2 center_to_point = point - center;
-    float corner_radius = pick_corner_radius(center_to_point, corner_radii);
-
-    if (corner_radius == 0.0) {
-        // No corner radius, use sharp corners
-        float2 corner_to_point = abs(center_to_point) - half_size;
-        return max(corner_to_point.x, corner_to_point.y);
-    }
-
-    // Power factor: 2 = circle, 4 = squircle, 8+ = square
-    float p = pow(2.0, 1.0 + smoothness * 2.0);
-
-    float2 corner_to_point = abs(center_to_point) - half_size + corner_radius;
-    float2 corner_max = max(corner_to_point, float2(0.0));
-
-    // Superellipse SDF approximation
-    float dist = pow(pow(abs(corner_max.x), p) + pow(abs(corner_max.y), p), 1.0 / p);
-
-    return dist + min(0.0, max(corner_to_point.x, corner_to_point.y)) - corner_radius;
 }
 
 // A standard gaussian function, used for weighting samples
