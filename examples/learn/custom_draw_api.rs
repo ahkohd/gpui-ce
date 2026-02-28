@@ -26,32 +26,32 @@ use gpui::{
 };
 
 const SHADER_SOURCE: &str = r#"
-struct VertexInput {
-  a0: vec2<f32>,
-  a1: vec2<f32>,
-};
-
-struct VertexOutput {
-  @builtin(position) position: vec4<f32>,
-  @location(0) uv: vec2<f32>,
-};
-
-var b0: texture_2d<f32>;
-var b1: sampler;
-
-@vertex
-fn vs_main(input: VertexInput) -> VertexOutput {
-  var out: VertexOutput;
-  out.position = vec4<f32>(input.a0, 0.0, 1.0);
-  out.uv = input.a1;
-  return out;
-}
-
-@fragment
-fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
-  return textureSample(b0, b1, input.uv);
-}
-"#;
+ struct VertexInput {
+   a0: vec2<f32>,
+   a1: vec2<f32>,
+ };
+ 
+ struct VertexOutput {
+   @builtin(position) position: vec4<f32>,
+   @location(0) uv: vec2<f32>,
+ };
+ 
+ var b0: texture_2d<f32>;
+ var b1: sampler;
+ 
+ @vertex
+ fn vs_main(input: VertexInput) -> VertexOutput {
+   var out: VertexOutput;
+   out.position = vec4<f32>(input.a0, 0.0, 1.0);
+   out.uv = input.a1;
+   return out;
+ }
+ 
+ @fragment
+ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
+   return textureSample(b0, b1, input.uv);
+ }
+ "#;
 
 struct CustomDrawExample {
     pipeline: Option<CustomPipelineId>,
@@ -112,11 +112,13 @@ impl CustomDrawExample {
                             name: CustomVertexAttributeName::A0,
                             offset: 0,
                             format: CustomVertexFormat::F32Vec2,
+                            location: None,
                         },
                         CustomVertexAttribute {
                             name: CustomVertexAttributeName::A1,
                             offset: 8,
                             format: CustomVertexFormat::F32Vec2,
+                            location: None,
                         },
                     ],
                 },
@@ -127,10 +129,12 @@ impl CustomDrawExample {
                 CustomBindingDesc {
                     name: CustomBindingName::B0,
                     kind: CustomBindingKind::Texture,
+                    slot: None,
                 },
                 CustomBindingDesc {
                     name: CustomBindingName::B1,
                     kind: CustomBindingKind::Sampler,
+                    slot: None,
                 },
             ],
         })?;
@@ -217,7 +221,10 @@ impl Render for CustomDrawExample {
                 }
             };
 
-            let paint = move |_bounds: Bounds<_>, params: CustomDrawParams, window: &mut Window, _cx: &mut App| {
+            let paint = move |_bounds: Bounds<_>,
+                              params: CustomDrawParams,
+                              window: &mut Window,
+                              _cx: &mut App| {
                 if let Err(err) = window.paint_custom(params) {
                     log::error!("custom draw paint failed: {err}");
                 }
@@ -271,7 +278,10 @@ fn quad_vertex_data() -> Arc<[u8]> {
     Arc::from(data)
 }
 
-fn quad_vertex_data_for_bounds(bounds: Bounds<gpui::Pixels>, viewport: gpui::Size<gpui::Pixels>) -> Arc<[u8]> {
+fn quad_vertex_data_for_bounds(
+    bounds: Bounds<gpui::Pixels>,
+    viewport: gpui::Size<gpui::Pixels>,
+) -> Arc<[u8]> {
     let mut data = Vec::with_capacity(6 * 4 * 4);
     let left = bounds.origin.x;
     let top = bounds.origin.y;

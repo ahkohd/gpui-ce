@@ -13,61 +13,63 @@ use gpui::{
     CustomBindingKind, CustomBindingName, CustomBindingValue, CustomBufferDesc, CustomBufferId,
     CustomBufferSource, CustomDrawParams, CustomFilterMode, CustomPipelineDesc, CustomPipelineId,
     CustomPrimitiveTopology, CustomSamplerDesc, CustomSamplerId, CustomTextureDesc,
-    CustomTextureFormat, CustomTextureId, CustomVertexAttribute, CustomVertexAttributeName,
-    CustomVertexBuffer, CustomVertexFetch, CustomVertexFormat, CustomVertexLayout, Hsla, Render,
-    Styled, Window, WindowBounds, WindowOptions, canvas, div, prelude::*, px, size,
+    CustomTextureFormat, CustomTextureId, CustomUniformBuilder, CustomVertexAttribute,
+    CustomVertexAttributeName, CustomVertexBuffer, CustomVertexFetch, CustomVertexFormat,
+    CustomVertexLayout, Hsla, Render, Styled, Window, WindowBounds, WindowOptions, canvas, div,
+    prelude::*, px, size,
 };
 
 const SHADER_SOURCE: &str = r#"
-struct VertexInput {
-  a0: vec2<f32>,
-  a1: vec2<f32>,
-};
-
-struct VertexOutput {
-  @builtin(position) position: vec4<f32>,
-  @location(0) uv: vec2<f32>,
-};
-
-struct Uniforms {
-  bounds_origin: vec2<f32>,
-  bounds_size: vec2<f32>,
-  viewport: vec2<f32>,
-  grid: vec2<f32>,
-  pad: vec2<f32>,
-};
-
-var b0: texture_2d<f32>;
-var b1: sampler;
-var<uniform> b2: Uniforms;
-
-@vertex
-fn vs_main(input: VertexInput, @builtin(instance_index) instance_index: u32) -> VertexOutput {
-  var out: VertexOutput;
-  let grid_x = max(u32(b2.grid.x), 1u);
-  let grid_y = max(u32(b2.grid.y), 1u);
-  let gx = f32(instance_index % grid_x);
-  let gy = f32(instance_index / grid_x);
-  let fx = select(0.5, gx / max(f32(grid_x - 1u), 1.0), grid_x > 1u);
-  let fy = select(0.5, gy / max(f32(grid_y - 1u), 1.0), grid_y > 1u);
-  let inner = max(b2.bounds_size - b2.pad * 2.0, vec2<f32>(1.0, 1.0));
-  let px = b2.bounds_origin + b2.pad + inner * vec2<f32>(fx, fy);
-  let ndc = vec2<f32>(
-    (px.x / b2.viewport.x) * 2.0 - 1.0,
-    1.0 - (px.y / b2.viewport.y) * 2.0
-  );
-  let pos = input.a0 + ndc;
-  out.position = vec4<f32>(pos, 0.0, 1.0);
-  out.uv = input.a1;
-  return out;
-}
-
-@fragment
-fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
-  let tex = textureSample(b0, b1, input.uv);
-  return tex;
-}
-"#;
+ struct VertexInput {
+   a0: vec2<f32>,
+   a1: vec2<f32>,
+ };
+ 
+ struct VertexOutput {
+   @builtin(position) position: vec4<f32>,
+   @location(0) uv: vec2<f32>,
+ };
+ 
+ struct Uniforms {
+   bounds_origin: vec2<f32>,
+   bounds_size: vec2<f32>,
+   viewport: vec2<f32>,
+   grid: vec2<f32>,
+   pad: vec2<f32>,
+  pad2: vec2<f32>,
+ };
+ 
+ var b0: texture_2d<f32>;
+ var b1: sampler;
+ var<uniform> b2: Uniforms;
+ 
+ @vertex
+ fn vs_main(input: VertexInput, @builtin(instance_index) instance_index: u32) -> VertexOutput {
+   var out: VertexOutput;
+   let grid_x = max(u32(b2.grid.x), 1u);
+   let grid_y = max(u32(b2.grid.y), 1u);
+   let gx = f32(instance_index % grid_x);
+   let gy = f32(instance_index / grid_x);
+   let fx = select(0.5, gx / max(f32(grid_x - 1u), 1.0), grid_x > 1u);
+   let fy = select(0.5, gy / max(f32(grid_y - 1u), 1.0), grid_y > 1u);
+   let inner = max(b2.bounds_size - b2.pad * 2.0, vec2<f32>(1.0, 1.0));
+   let px = b2.bounds_origin + b2.pad + inner * vec2<f32>(fx, fy);
+   let ndc = vec2<f32>(
+     (px.x / b2.viewport.x) * 2.0 - 1.0,
+     1.0 - (px.y / b2.viewport.y) * 2.0
+   );
+   let pos = input.a0 + ndc;
+   out.position = vec4<f32>(pos, 0.0, 1.0);
+   out.uv = input.a1;
+   return out;
+ }
+ 
+ @fragment
+ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
+   let tex = textureSample(b0, b1, input.uv);
+   return tex;
+ }
+ "#;
 
 const DEFAULT_INSTANCE_COUNT: usize = 400;
 const DEFAULT_QUAD_SIZE_PX: f32 = 14.0;
@@ -193,39 +195,42 @@ impl StressHarness {
             shader_source: SHADER_SOURCE.to_string(),
             vertex_entry: "vs_main".to_string(),
             fragment_entry: "fs_main".to_string(),
-            vertex_fetches: vec![
-                CustomVertexFetch {
-                    layout: CustomVertexLayout {
-                        stride: 16,
-                        attributes: vec![
-                            CustomVertexAttribute {
-                                name: CustomVertexAttributeName::A0,
-                                offset: 0,
-                                format: CustomVertexFormat::F32Vec2,
-                            },
-                            CustomVertexAttribute {
-                                name: CustomVertexAttributeName::A1,
-                                offset: 8,
-                                format: CustomVertexFormat::F32Vec2,
-                            },
-                        ],
-                    },
-                    instanced: false,
+            vertex_fetches: vec![CustomVertexFetch {
+                layout: CustomVertexLayout {
+                    stride: 16,
+                    attributes: vec![
+                        CustomVertexAttribute {
+                            name: CustomVertexAttributeName::A0,
+                            offset: 0,
+                            format: CustomVertexFormat::F32Vec2,
+                            location: None,
+                        },
+                        CustomVertexAttribute {
+                            name: CustomVertexAttributeName::A1,
+                            offset: 8,
+                            format: CustomVertexFormat::F32Vec2,
+                            location: None,
+                        },
+                    ],
                 },
-            ],
+                instanced: false,
+            }],
             primitive: CustomPrimitiveTopology::TriangleList,
             bindings: vec![
                 CustomBindingDesc {
                     name: CustomBindingName::B0,
                     kind: CustomBindingKind::Texture,
+                    slot: None,
                 },
                 CustomBindingDesc {
                     name: CustomBindingName::B1,
                     kind: CustomBindingKind::Sampler,
+                    slot: None,
                 },
                 CustomBindingDesc {
                     name: CustomBindingName::B2,
-                    kind: CustomBindingKind::Uniform { size: 40 },
+                    kind: CustomBindingKind::Uniform { size: 48 },
+                    slot: None,
                 },
             ],
         })?;
@@ -280,15 +285,10 @@ impl Render for StressHarness {
                     .text_color(colors.text)
                     .child("Custom Draw Stress"),
             )
-            .child(
-                div()
-                    .text_sm()
-                    .text_color(colors.text_muted)
-                    .child(format!(
-                        "Draws: 1  |  Instances: {}  |  FPS: {:.1}",
-                        self.config.instances, self.last_fps
-                    )),
-            );
+            .child(div().text_sm().text_color(colors.text_muted).child(format!(
+                "Draws: 1  |  Instances: {}  |  FPS: {:.1}",
+                self.config.instances, self.last_fps
+            )));
 
         let surface: Hsla = colors.surface.into();
         let content = if let Some(err) = &self.error {
@@ -333,44 +333,46 @@ impl Render for StressHarness {
                         log::error!("custom draw vertex update failed: {err}");
                     }
                 }
-                let mut uniform = Vec::with_capacity(40);
-                push_f32(&mut uniform, f32::from(layout_bounds.origin.x));
-                push_f32(&mut uniform, f32::from(layout_bounds.origin.y));
-                push_f32(&mut uniform, f32::from(layout_bounds.size.width));
-                push_f32(&mut uniform, f32::from(layout_bounds.size.height));
-                push_f32(&mut uniform, f32::from(viewport.width));
-                push_f32(&mut uniform, f32::from(viewport.height));
+                let mut uniform = CustomUniformBuilder::new();
+                uniform
+                    .push_vec2(
+                        f32::from(layout_bounds.origin.x),
+                        f32::from(layout_bounds.origin.y),
+                    )
+                    .push_vec2(
+                        f32::from(layout_bounds.size.width),
+                        f32::from(layout_bounds.size.height),
+                    )
+                    .push_vec2(f32::from(viewport.width), f32::from(viewport.height));
                 let grid = (config.instances as f32).sqrt().ceil();
-                push_f32(&mut uniform, grid);
-                push_f32(&mut uniform, grid);
-                push_f32(&mut uniform, f32::from(px(config.grid_pad_px)));
-                push_f32(&mut uniform, f32::from(px(config.grid_pad_px)));
+                uniform.push_vec2(grid, grid).push_vec2(
+                    f32::from(px(config.grid_pad_px)),
+                    f32::from(px(config.grid_pad_px)),
+                );
                 CustomDrawParams {
                     bounds,
                     pipeline,
-                    vertex_buffers: vec![
-                        CustomVertexBuffer {
-                            source: CustomBufferSource::Buffer(vertex_buffer),
-                        },
-                    ],
+                    vertex_buffers: vec![CustomVertexBuffer {
+                        source: CustomBufferSource::Buffer(vertex_buffer),
+                    }],
                     vertex_count: 6,
                     instance_count: config.instances as u32,
                     bindings: vec![
                         CustomBindingValue::Texture(texture),
                         CustomBindingValue::Sampler(sampler),
-                        CustomBindingValue::Uniform(CustomBufferSource::Inline(Arc::from(
-                            uniform,
-                        ))),
+                        CustomBindingValue::Uniform(CustomBufferSource::Inline(uniform.finish())),
                     ],
                 }
             };
 
-            let paint =
-                move |_bounds: Bounds<_>, params: CustomDrawParams, window: &mut Window, _cx: &mut App| {
-                    if let Err(err) = window.paint_custom(params) {
-                        log::error!("custom draw paint failed: {err}");
-                    }
-                };
+            let paint = move |_bounds: Bounds<_>,
+                              params: CustomDrawParams,
+                              window: &mut Window,
+                              _cx: &mut App| {
+                if let Err(err) = window.paint_custom(params) {
+                    log::error!("custom draw paint failed: {err}");
+                }
+            };
 
             div()
                 .w(px(640.))
@@ -395,10 +397,6 @@ impl Render for StressHarness {
     }
 }
 
-fn push_f32(data: &mut Vec<u8>, value: f32) {
-    data.extend_from_slice(&value.to_le_bytes());
-}
-
 fn inset_bounds(bounds: Bounds<gpui::Pixels>, inset: gpui::Pixels) -> Bounds<gpui::Pixels> {
     let width = (bounds.size.width - inset * 2.0).max(px(1.0));
     let height = (bounds.size.height - inset * 2.0).max(px(1.0));
@@ -406,6 +404,10 @@ fn inset_bounds(bounds: Bounds<gpui::Pixels>, inset: gpui::Pixels) -> Bounds<gpu
         origin: bounds.origin + gpui::Point::new(inset, inset),
         size: gpui::Size::new(width, height),
     }
+}
+
+fn push_f32(data: &mut Vec<u8>, value: f32) {
+    data.extend_from_slice(&value.to_le_bytes());
 }
 
 fn quad_vertex_data() -> Arc<[u8]> {

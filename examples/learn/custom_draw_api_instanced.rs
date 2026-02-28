@@ -23,47 +23,47 @@ use gpui::{
 };
 
 const SHADER_SOURCE: &str = r#"
-struct VertexInput {
-  a0: vec2<f32>,
-  a1: vec2<f32>,
-  a2: vec2<f32>,
-  a3: vec4<f32>,
-};
-
-struct VertexOutput {
-  @builtin(position) position: vec4<f32>,
-  @location(0) uv: vec2<f32>,
-  @location(1) color: vec4<f32>,
-};
-
-struct Uniforms {
-  time: f32,
-  amplitude: f32,
-  pad: vec2<f32>,
-};
-
-var b0: texture_2d<f32>;
-var b1: sampler;
-var<uniform> b2: Uniforms;
-
-@vertex
-fn vs_main(input: VertexInput, @builtin(instance_index) instance_index: u32) -> VertexOutput {
-  var out: VertexOutput;
-  let phase = f32(instance_index) * 0.35;
-  let wobble = vec2<f32>(sin(b2.time + phase), cos(b2.time + phase)) * b2.amplitude;
-  let pos = input.a0 + input.a2 + wobble;
-  out.position = vec4<f32>(pos, 0.0, 1.0);
-  out.uv = input.a1;
-  out.color = input.a3;
-  return out;
-}
-
-@fragment
-fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
-  let tex = textureSample(b0, b1, input.uv);
-  return tex * input.color;
-}
-"#;
+ struct VertexInput {
+   a0: vec2<f32>,
+   a1: vec2<f32>,
+   a2: vec2<f32>,
+   a3: vec4<f32>,
+ };
+ 
+ struct VertexOutput {
+   @builtin(position) position: vec4<f32>,
+   @location(0) uv: vec2<f32>,
+   @location(1) color: vec4<f32>,
+ };
+ 
+ struct Uniforms {
+   time: f32,
+   amplitude: f32,
+   pad: vec2<f32>,
+ };
+ 
+ var b0: texture_2d<f32>;
+ var b1: sampler;
+ var<uniform> b2: Uniforms;
+ 
+ @vertex
+ fn vs_main(input: VertexInput, @builtin(instance_index) instance_index: u32) -> VertexOutput {
+   var out: VertexOutput;
+   let phase = f32(instance_index) * 0.35;
+   let wobble = vec2<f32>(sin(b2.time + phase), cos(b2.time + phase)) * b2.amplitude;
+   let pos = input.a0 + input.a2 + wobble;
+   out.position = vec4<f32>(pos, 0.0, 1.0);
+   out.uv = input.a1;
+   out.color = input.a3;
+   return out;
+ }
+ 
+ @fragment
+ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
+   let tex = textureSample(b0, b1, input.uv);
+   return tex * input.color;
+ }
+ "#;
 
 struct InstancedCustomDrawExample {
     pipeline: Option<CustomPipelineId>,
@@ -194,11 +194,13 @@ impl InstancedCustomDrawExample {
                                 name: CustomVertexAttributeName::A0,
                                 offset: 0,
                                 format: CustomVertexFormat::F32Vec2,
+                                location: None,
                             },
                             CustomVertexAttribute {
                                 name: CustomVertexAttributeName::A1,
                                 offset: 8,
                                 format: CustomVertexFormat::F32Vec2,
+                                location: None,
                             },
                         ],
                     },
@@ -212,11 +214,13 @@ impl InstancedCustomDrawExample {
                                 name: CustomVertexAttributeName::A2,
                                 offset: 0,
                                 format: CustomVertexFormat::F32Vec2,
+                                location: None,
                             },
                             CustomVertexAttribute {
                                 name: CustomVertexAttributeName::A3,
                                 offset: 8,
                                 format: CustomVertexFormat::F32Vec4,
+                                location: None,
                             },
                         ],
                     },
@@ -228,14 +232,17 @@ impl InstancedCustomDrawExample {
                 CustomBindingDesc {
                     name: CustomBindingName::B0,
                     kind: CustomBindingKind::Texture,
+                    slot: None,
                 },
                 CustomBindingDesc {
                     name: CustomBindingName::B1,
                     kind: CustomBindingKind::Sampler,
+                    slot: None,
                 },
                 CustomBindingDesc {
                     name: CustomBindingName::B2,
                     kind: CustomBindingKind::Uniform { size: 16 },
+                    slot: None,
                 },
             ],
         })?;
@@ -247,11 +254,7 @@ impl InstancedCustomDrawExample {
 
         let instance_buffer = window.create_custom_buffer(CustomBufferDesc {
             name: "quad_instances".to_string(),
-            data: instance_data_for_bounds(
-                Bounds::default(),
-                window.viewport_size(),
-                self.config,
-            ),
+            data: instance_data_for_bounds(Bounds::default(), window.viewport_size(), self.config),
         })?;
 
         let texture_data = checker_texture_data();
@@ -325,12 +328,14 @@ impl Render for InstancedCustomDrawExample {
                 let viewport = window.viewport_size();
                 let vertex_data =
                     quad_vertex_data_for_pixel_size(px(config.quad_size_px), viewport);
-                if let Err(err) = window.update_custom_buffer(vertex_buffer, Arc::clone(&vertex_data)) {
+                if let Err(err) =
+                    window.update_custom_buffer(vertex_buffer, Arc::clone(&vertex_data))
+                {
                     log::error!("custom draw vertex update failed: {err}");
                 }
-                let instance_data =
-                    instance_data_for_bounds(layout_bounds, viewport, config);
-                if let Err(err) = window.update_custom_buffer(instance_buffer, Arc::clone(&instance_data))
+                let instance_data = instance_data_for_bounds(layout_bounds, viewport, config);
+                if let Err(err) =
+                    window.update_custom_buffer(instance_buffer, Arc::clone(&instance_data))
                 {
                     log::error!("custom draw instance update failed: {err}");
                 }
@@ -379,12 +384,14 @@ impl Render for InstancedCustomDrawExample {
                 }
             };
 
-            let paint =
-                move |_bounds: Bounds<_>, params: CustomDrawParams, window: &mut Window, _cx: &mut App| {
-                    if let Err(err) = window.paint_custom(params) {
-                        log::error!("custom draw paint failed: {err}");
-                    }
-                };
+            let paint = move |_bounds: Bounds<_>,
+                              params: CustomDrawParams,
+                              window: &mut Window,
+                              _cx: &mut App| {
+                if let Err(err) = window.paint_custom(params) {
+                    log::error!("custom draw paint failed: {err}");
+                }
+            };
 
             div()
                 .w(px(420.))
@@ -495,8 +502,16 @@ fn instance_data_for_bounds(
     for i in 0..config.instances {
         let gx = (i % grid) as f32;
         let gy = (i / grid) as f32;
-        let fx = if grid > 1 { gx / (grid as f32 - 1.0) } else { 0.5 };
-        let fy = if grid > 1 { gy / (grid as f32 - 1.0) } else { 0.5 };
+        let fx = if grid > 1 {
+            gx / (grid as f32 - 1.0)
+        } else {
+            0.5
+        };
+        let fy = if grid > 1 {
+            gy / (grid as f32 - 1.0)
+        } else {
+            0.5
+        };
         let px_x = bounds.origin.x + pad + inner_width * fx;
         let px_y = bounds.origin.y + pad + inner_height * fy;
 
