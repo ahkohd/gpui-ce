@@ -2946,6 +2946,8 @@ impl Window {
             corner_radii: quad.corner_radii.scale(scale_factor),
             border_widths: quad.border_widths.scale(scale_factor),
             border_style: quad.border_style,
+            smoothness: 0.0,
+            pad: 0,
         });
     }
 
@@ -3149,6 +3151,10 @@ impl Window {
                 content_mask,
                 tile,
                 opacity,
+                smoothness: 0.0,
+                pad2: 0,
+                pad3: 0,
+                pad4: 0,
             });
         }
         Ok(())
@@ -3267,6 +3273,10 @@ impl Window {
             corner_radii,
             tile,
             opacity,
+            smoothness: 0.0,
+            pad2: 0,
+            pad3: 0,
+            pad4: 0,
         });
         Ok(())
     }
