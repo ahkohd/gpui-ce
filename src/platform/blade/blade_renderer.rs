@@ -3,9 +3,9 @@
 
 use super::{BladeAtlas, BladeContext};
 use crate::{
-    Background, Bounds, DevicePixels, GpuSpecs, MonochromeSprite, Path, Point, PolychromeSprite,
-    PrimitiveBatch, Quad, ScaledPixels, Scene, Shadow, Size, Underline,
-    get_gamma_correction_ratios,
+    Background, Bounds, ContentMask, CustomBufferSource, DevicePixels, Edges, GpuSpecs,
+    MonochromeSprite, Path, Point, PolychromeSprite, PrimitiveBatch, Quad, ScaledPixels, Scene,
+    Shadow, Size, Underline, get_gamma_correction_ratios,
 };
 use blade_graphics as gpu;
 use blade_util::{BufferBelt, BufferBeltDescriptor};
@@ -44,9 +44,45 @@ impl From<Bounds<ScaledPixels>> for PodBounds {
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
+struct PodEdges {
+    top: f32,
+    right: f32,
+    bottom: f32,
+    left: f32,
+}
+
+impl From<Edges<ScaledPixels>> for PodEdges {
+    fn from(edges: Edges<ScaledPixels>) -> Self {
+        Self {
+            top: edges.top.0,
+            right: edges.right.0,
+            bottom: edges.bottom.0,
+            left: edges.left.0,
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct PodContentMask {
+    bounds: PodBounds,
+    fade_out: PodEdges,
+}
+
+impl From<ContentMask<ScaledPixels>> for PodContentMask {
+    fn from(mask: ContentMask<ScaledPixels>) -> Self {
+        Self {
+            bounds: mask.bounds.into(),
+            fade_out: mask.fade_out.into(),
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
 struct SurfaceParams {
     bounds: PodBounds,
-    content_mask: PodBounds,
+    content_mask: PodContentMask,
 }
 
 #[derive(blade_macros::ShaderData)]
@@ -891,7 +927,7 @@ impl BladeRenderer {
                                     globals,
                                     surface_locals: SurfaceParams {
                                         bounds: surface.bounds.into(),
-                                        content_mask: surface.content_mask.bounds.into(),
+                                        content_mask: surface.content_mask.into(),
                                     },
                                     t_y,
                                     t_cb_cr,
@@ -919,70 +955,59 @@ impl BladeRenderer {
                          let pipeline_id = batch[0].pipeline;
                          let bindings = &batch[0].bindings;
  
-                         if let Some(()) = self.custom_draw.with_pipeline(
-                             pipeline_id,
--                            |pipeline, binding_kinds| {
-+                            |pipeline, binding_kinds, binding_indices| {
-                                 let mut encoder = pass.with(pipeline);
--                                if !binding_kinds.is_empty() {
--                                    if bindings.len() < binding_kinds.len() {
--                                        log::warn!(
--                                            "custom draw bindings missing (expected {}, got {})",
--                                            binding_kinds.len(),
--                                            bindings.len()
--                                        );
--                                        return;
-+                                let mut max_index = 0usize;
-+                                for indices in binding_indices {
-+                                    for index in indices.iter().flatten() {
-+                                        max_index = max_index.max(*index);
-+                                    }
-+                                }
-+                                if !binding_kinds.is_empty() && bindings.len() <= max_index {
-+                                    log::warn!(
-+                                        "custom draw bindings missing (expected at least {}, got {})",
-+                                        max_index + 1,
-+                                        bindings.len()
-+                                    );
-+                                }
-+                                for (group_index, group_kinds) in binding_kinds.iter().enumerate() {
-+                                    if group_kinds.is_empty() {
-+                                        continue;
-+                                    }
-+                                    let group_indices = binding_indices
-+                                        .get(group_index)
-+                                        .map(|indices| indices.as_slice())
-+                                        .unwrap_or(&[]);
-+                                    for (slot_index, binding_index) in
-+                                        group_indices.iter().enumerate()
-+                                    {
-+                                        let Some(binding_index) = binding_index else {
-+                                            continue;
-+                                        };
-+                                        if bindings.get(*binding_index).is_none() {
-+                                            log::warn!(
-+                                                "custom draw missing binding value for group {} binding {} (value index {})",
-+                                                group_index,
-+                                                slot_index,
-+                                                binding_index
-+                                            );
-+                                            break;
-+                                        }
-                                     }
-                                     let bindings = CustomBindings {
-                                         bindings,
--                                        binding_kinds,
-+                                        binding_kinds: group_kinds,
-+                                        binding_indices: group_indices,
-                                         buffers: &buffers_snapshot,
-                                         textures: &textures_snapshot,
-                                         samplers: &samplers_snapshot,
-                                         instance_belt: &mut self.instance_belt as *mut _,
-                                         gpu: Arc::as_ptr(&self.gpu),
-                                     };
--                                    encoder.bind(0, &bindings);
-+                                    encoder.bind(group_index as u32, &bindings);
-                                 }
+                        if let Some(()) = self.custom_draw.with_pipeline(
+                            pipeline_id,
+                            |pipeline, binding_kinds, binding_indices| {
+                                let mut encoder = pass.with(pipeline);
+                                let mut max_index = 0usize;
+                                for indices in binding_indices {
+                                    for index in indices.iter().flatten() {
+                                        max_index = max_index.max(*index);
+                                    }
+                                }
+                                if !binding_kinds.is_empty() && bindings.len() <= max_index {
+                                    log::warn!(
+                                        "custom draw bindings missing (expected at least {}, got {})",
+                                        max_index + 1,
+                                        bindings.len()
+                                    );
+                                }
+                                for (group_index, group_kinds) in binding_kinds.iter().enumerate() {
+                                    if group_kinds.is_empty() {
+                                        continue;
+                                    }
+                                    let group_indices = binding_indices
+                                        .get(group_index)
+                                        .map(|indices| indices.as_slice())
+                                        .unwrap_or(&[]);
+                                    for (slot_index, binding_index) in
+                                        group_indices.iter().enumerate()
+                                    {
+                                        let Some(binding_index) = binding_index else {
+                                            continue;
+                                        };
+                                        if bindings.get(*binding_index).is_none() {
+                                            log::warn!(
+                                                "custom draw missing binding value for group {} binding {} (value index {})",
+                                                group_index,
+                                                slot_index,
+                                                binding_index
+                                            );
+                                            break;
+                                        }
+                                    }
+                                    let bindings = CustomBindings {
+                                        bindings,
+                                        binding_kinds: group_kinds,
+                                        binding_indices: group_indices,
+                                        buffers: &buffers_snapshot,
+                                        textures: &textures_snapshot,
+                                        samplers: &samplers_snapshot,
+                                        instance_belt: &mut self.instance_belt as *mut _,
+                                        gpu: Arc::as_ptr(&self.gpu),
+                                    };
+                                    encoder.bind(group_index as u32, &bindings);
+                                }
  
                                  for draw in batch {
                                      if draw.vertex_count == 0 || draw.instance_count == 0 {
