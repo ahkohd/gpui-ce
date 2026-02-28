@@ -1,4 +1,4 @@
-+use std::collections::BTreeMap;
+use std::collections::BTreeMap;
  use std::sync::{Arc, Mutex};
  
  use blade_graphics::{self as gpu, ShaderBindable as _};
@@ -22,12 +22,11 @@
      pending_uploads: Mutex<Vec<PendingUpload>>,
  }
  
- struct BladeCustomPipeline {
-     pipeline: gpu::RenderPipeline,
--    bindings: Vec<CustomBindingKind>,
-+    bindings: Vec<Vec<CustomBindingKind>>,
-+    binding_indices: Vec<Vec<Option<usize>>>,
- }
+struct BladeCustomPipeline {
+    pipeline: gpu::RenderPipeline,
+    bindings: Vec<Vec<CustomBindingKind>>,
+    binding_indices: Vec<Vec<Option<usize>>>,
+}
  
  struct BladeCustomBuffer {
      buffer: gpu::Buffer,
@@ -91,20 +90,14 @@
          self.pending_uploads.lock().unwrap().clear();
      }
  
-     pub(crate) fn with_pipeline<F, R>(&self, id: CustomPipelineId, f: F) -> Option<R>
-     where
--        F: FnOnce(&gpu::RenderPipeline, &[CustomBindingKind]) -> R,
-+        F: FnOnce(&gpu::RenderPipeline, &[Vec<CustomBindingKind>], &[Vec<Option<usize>>]) -> R,
-     {
-         let pipelines = self.pipelines.lock().unwrap();
-         let entry = pipelines.get(id.0 as usize)?.as_ref()?;
--        Some(f(&entry.pipeline, &entry.bindings))
-+        Some(f(
-+            &entry.pipeline,
-+            &entry.bindings,
-+            &entry.binding_indices,
-+        ))
-     }
+    pub(crate) fn with_pipeline<F, R>(&self, id: CustomPipelineId, f: F) -> Option<R>
+    where
+        F: FnOnce(&gpu::RenderPipeline, &[Vec<CustomBindingKind>], &[Vec<Option<usize>>]) -> R,
+    {
+        let pipelines = self.pipelines.lock().unwrap();
+        let entry = pipelines.get(id.0 as usize)?.as_ref()?;
+        Some(f(&entry.pipeline, &entry.bindings, &entry.binding_indices))
+    }
  
      pub(crate) fn get_buffer(&self, id: CustomBufferId) -> Option<gpu::Buffer> {
          let buffers = self.buffers.lock().unwrap();
@@ -226,7 +219,7 @@
                              CustomVertexFormat::I32Vec3 => gpu::VertexFormat::I32Vec3,
                              CustomVertexFormat::I32Vec4 => gpu::VertexFormat::I32Vec4,
                          },
-+                        location: attr.location,
+                        location: attr.location,
                      },
                  ));
              }
@@ -244,82 +237,67 @@
              });
          }
  
--        let mut binding_layout = gpu::ShaderDataLayout::default();
--        let mut binding_kinds = Vec::new();
--        for binding in &desc.bindings {
-+        let mut group_entries: BTreeMap<u32, Vec<Option<(&'static str, gpu::ShaderBinding, CustomBindingKind, usize)>>> =
-+            BTreeMap::new();
-+        for (flat_index, binding) in desc.bindings.iter().enumerate() {
-+            let slot = binding
-+                .slot
-+                .unwrap_or(crate::CustomBindingSlot { group: 0, binding: binding.name.index() });
+        let mut group_entries: BTreeMap<u32, Vec<Option<(&'static str, gpu::ShaderBinding, CustomBindingKind, usize)>>> =
+            BTreeMap::new();
+        for (flat_index, binding) in desc.bindings.iter().enumerate() {
+            let slot = binding
+                .slot
+                .unwrap_or(crate::CustomBindingSlot { group: 0, binding: binding.name.index() });
              let name = binding.name.as_str();
              let shader_binding = match binding.kind {
                  CustomBindingKind::Buffer => gpu::ShaderBinding::Buffer,
                  CustomBindingKind::Texture => gpu::ShaderBinding::Texture,
                  CustomBindingKind::Sampler => gpu::ShaderBinding::Sampler,
--                CustomBindingKind::Uniform { size } => {
--                    gpu::ShaderBinding::Plain { size }
--                }
-+                CustomBindingKind::Uniform { size } => gpu::ShaderBinding::Plain { size },
+                CustomBindingKind::Uniform { size } => gpu::ShaderBinding::Plain { size },
              };
--            binding_layout.bindings.push((name, shader_binding));
--            binding_kinds.push(binding.kind);
--        }
--
--        let data_layouts: Vec<&gpu::ShaderDataLayout> = if desc.bindings.is_empty() {
--            Vec::new()
--        } else {
--            vec![&binding_layout]
--        };
-+            let group = group_entries.entry(slot.group).or_default();
-+            let binding_index = slot.binding as usize;
-+            if group.len() <= binding_index {
-+                group.resize(binding_index + 1, None);
-+            }
-+            group[binding_index] = Some((name, shader_binding, binding.kind, flat_index));
-+        }
-+
-+        let mut binding_layouts: Vec<gpu::ShaderDataLayout> = Vec::new();
-+        let mut binding_kinds_by_group: Vec<Vec<CustomBindingKind>> = Vec::new();
-+        let mut binding_indices_by_group: Vec<Vec<Option<usize>>> = Vec::new();
-+        if !desc.bindings.is_empty() {
-+            let max_group = *group_entries.keys().max().unwrap_or(&0);
-+            for group in 0..=max_group {
-+                if let Some(entries) = group_entries.get(&group) {
-+                    let mut layout = gpu::ShaderDataLayout::default();
-+                    let mut kinds = Vec::with_capacity(entries.len());
-+                    let mut indices = Vec::with_capacity(entries.len());
-+                    for (binding_index, entry) in entries.iter().enumerate() {
-+                        match entry {
-+                            Some((name, shader_binding, kind, flat_index)) => {
-+                                layout.bindings.push((name, *shader_binding));
-+                                kinds.push(*kind);
-+                                indices.push(Some(*flat_index));
-+                            }
-+                            None => {
-+                                let placeholder = Box::leak(
-+                                    format!("__gpui_unused_b{}_{}", group, binding_index)
-+                                        .into_boxed_str(),
-+                                );
-+                                layout.bindings.push((placeholder, gpu::ShaderBinding::Buffer));
-+                                kinds.push(CustomBindingKind::Buffer);
-+                                indices.push(None);
-+                            }
-+                        }
-+                    }
-+                    binding_layouts.push(layout);
-+                    binding_kinds_by_group.push(kinds);
-+                    binding_indices_by_group.push(indices);
-+                } else {
-+                    binding_layouts.push(gpu::ShaderDataLayout::default());
-+                    binding_kinds_by_group.push(Vec::new());
-+                    binding_indices_by_group.push(Vec::new());
-+                }
-+            }
-+        }
-+
-+        let data_layouts: Vec<&gpu::ShaderDataLayout> = binding_layouts.iter().collect();
+            let group = group_entries.entry(slot.group).or_default();
+            let binding_index = slot.binding as usize;
+            if group.len() <= binding_index {
+                group.resize(binding_index + 1, None);
+            }
+            group[binding_index] = Some((name, shader_binding, binding.kind, flat_index));
+        }
+
+        let mut binding_layouts: Vec<gpu::ShaderDataLayout> = Vec::new();
+        let mut binding_kinds_by_group: Vec<Vec<CustomBindingKind>> = Vec::new();
+        let mut binding_indices_by_group: Vec<Vec<Option<usize>>> = Vec::new();
+        if !desc.bindings.is_empty() {
+            let max_group = *group_entries.keys().max().unwrap_or(&0);
+            for group in 0..=max_group {
+                if let Some(entries) = group_entries.get(&group) {
+                    let mut layout = gpu::ShaderDataLayout::default();
+                    let mut kinds = Vec::with_capacity(entries.len());
+                    let mut indices = Vec::with_capacity(entries.len());
+                    for (binding_index, entry) in entries.iter().enumerate() {
+                        match entry {
+                            Some((name, shader_binding, kind, flat_index)) => {
+                                layout.bindings.push((name, *shader_binding));
+                                kinds.push(*kind);
+                                indices.push(Some(*flat_index));
+                            }
+                            None => {
+                                let placeholder = Box::leak(
+                                    format!("__gpui_unused_b{}_{}", group, binding_index)
+                                        .into_boxed_str(),
+                                );
+                                layout.bindings.push((placeholder, gpu::ShaderBinding::Buffer));
+                                kinds.push(CustomBindingKind::Buffer);
+                                indices.push(None);
+                            }
+                        }
+                    }
+                    binding_layouts.push(layout);
+                    binding_kinds_by_group.push(kinds);
+                    binding_indices_by_group.push(indices);
+                } else {
+                    binding_layouts.push(gpu::ShaderDataLayout::default());
+                    binding_kinds_by_group.push(Vec::new());
+                    binding_indices_by_group.push(Vec::new());
+                }
+            }
+        }
+
+        let data_layouts: Vec<&gpu::ShaderDataLayout> = binding_layouts.iter().collect();
  
          let pipeline = self.gpu.create_render_pipeline(gpu::RenderPipelineDesc {
              name: &desc.name,
@@ -347,9 +325,8 @@
              &mut pipelines,
              BladeCustomPipeline {
                  pipeline,
--                bindings: binding_kinds,
-+                bindings: binding_kinds_by_group,
-+                binding_indices: binding_indices_by_group,
+                bindings: binding_kinds_by_group,
+                binding_indices: binding_indices_by_group,
              },
          );
          Ok(CustomPipelineId(id))
@@ -533,16 +510,16 @@
      }
  }
  
- pub(crate) struct CustomBindings<'a> {
-     pub(crate) bindings: &'a [CustomBindingValue],
-     pub(crate) binding_kinds: &'a [CustomBindingKind],
-+    pub(crate) binding_indices: &'a [Option<usize>],
-     pub(crate) buffers: &'a [Option<gpu::Buffer>],
-     pub(crate) textures: &'a [Option<gpu::TextureView>],
-     pub(crate) samplers: &'a [Option<gpu::Sampler>],
-     pub(crate) instance_belt: *mut blade_util::BufferBelt,
-     pub(crate) gpu: *const gpu::Context,
- }
+pub(crate) struct CustomBindings<'a> {
+    pub(crate) bindings: &'a [CustomBindingValue],
+    pub(crate) binding_kinds: &'a [CustomBindingKind],
+    pub(crate) binding_indices: &'a [Option<usize>],
+    pub(crate) buffers: &'a [Option<gpu::Buffer>],
+    pub(crate) textures: &'a [Option<gpu::TextureView>],
+    pub(crate) samplers: &'a [Option<gpu::Sampler>],
+    pub(crate) instance_belt: *mut blade_util::BufferBelt,
+    pub(crate) gpu: *const gpu::Context,
+}
  
  impl gpu::ShaderData for CustomBindings<'_> {
      fn layout() -> gpu::ShaderDataLayout {
@@ -550,21 +527,19 @@
      }
  
      fn fill(&self, mut context: gpu::PipelineContext) {
-         // SAFETY: CustomBindings is created during rendering with exclusive access to the
-         // renderer's instance_belt and gpu context. fill() runs synchronously on the render
-         // thread, so these raw pointers remain valid for the duration of the call.
-         let (instance_belt, gpu) = unsafe { (&mut *self.instance_belt, &*self.gpu) };
--        let count = self.bindings.len().min(self.binding_kinds.len());
-+        let count = self.binding_kinds.len().min(self.binding_indices.len());
-         for i in 0..count {
--            match (&self.binding_kinds[i], &self.bindings[i]) {
-+            let Some(binding_index) = self.binding_indices.get(i).and_then(|slot| *slot) else {
-+                continue;
-+            };
-+            let Some(binding_value) = self.bindings.get(binding_index) else {
-+                continue;
-+            };
-+            match (&self.binding_kinds[i], binding_value) {
+        // SAFETY: CustomBindings is created during rendering with exclusive access to the
+        // renderer's instance_belt and gpu context. fill() runs synchronously on the render
+        // thread, so these raw pointers remain valid for the duration of the call.
+        let (instance_belt, gpu) = unsafe { (&mut *self.instance_belt, &*self.gpu) };
+        let count = self.binding_kinds.len().min(self.binding_indices.len());
+        for i in 0..count {
+            let Some(binding_index) = self.binding_indices.get(i).and_then(|slot| *slot) else {
+                continue;
+            };
+            let Some(binding_value) = self.bindings.get(binding_index) else {
+                continue;
+            };
+            match (&self.binding_kinds[i], binding_value) {
                  (CustomBindingKind::Buffer, CustomBindingValue::Buffer(source)) => {
                      match source {
                          CustomBufferSource::Inline(data) => {

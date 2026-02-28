@@ -3,7 +3,10 @@ use crate::Inspector;
 use crate::{
     Action, AnyDrag, AnyElement, AnyImageCache, AnyTooltip, AnyView, App, AppContext, Arena, Asset,
     AsyncWindowContext, AvailableSpace, Background, BorderStyle, Bounds, BoxShadow, Capslock,
-    Context, Corners, CursorStyle, Decorations, DevicePixels, DispatchActionListener,
+    Context, Corners, CursorStyle, CustomBatchKey, CustomBufferDesc, CustomBufferId, CustomDraw,
+    CustomDrawParams, CustomPipelineDesc, CustomPipelineId, CustomSamplerDesc, CustomSamplerId,
+    CustomTextureDesc, CustomTextureId, Decorations, DevicePixels,
+    DispatchActionListener,
     DispatchNodeId, DispatchTree, DisplayId, Edges, Effect, Entity, EntityId, EventEmitter,
     FileDropEvent, FontId, Global, GlobalElementId, GlyphId, GpuSpecs, Hsla, InputHandler, IsZero,
     KeyBinding, KeyContext, KeyDownEvent, KeyEvent, Keystroke, KeystrokeEvent, LayoutId,
@@ -2943,8 +2946,6 @@ impl Window {
             corner_radii: quad.corner_radii.scale(scale_factor),
             border_widths: quad.border_widths.scale(scale_factor),
             border_style: quad.border_style,
-            smoothness: quad.smoothness.clamp(0.0, 1.0),
-            pad: 0,
         });
     }
 
@@ -3148,10 +3149,6 @@ impl Window {
                 content_mask,
                 tile,
                 opacity,
-                smoothness: 0.0, // Emojis use circular corners
-                pad2: 0,
-                pad3: 0,
-                pad4: 0,
             });
         }
         Ok(())
@@ -3234,27 +3231,6 @@ impl Window {
         frame_index: usize,
         grayscale: bool,
     ) -> Result<()> {
-        self.paint_image_with_corner_superellipse(
-            bounds,
-            corner_radii,
-            data,
-            frame_index,
-            grayscale,
-            0.0,
-        )
-    }
-
-    /// Paint an image with superellipse corners.
-    /// amount: 0.0 = circular corners, 0.5 = squircle, 1.0 = square-ish corners.
-    pub fn paint_image_with_corner_superellipse(
-        &mut self,
-        bounds: Bounds<Pixels>,
-        corner_radii: Corners<Pixels>,
-        data: Arc<RenderImage>,
-        frame_index: usize,
-        grayscale: bool,
-        amount: f32,
-    ) -> Result<()> {
         self.invalidator.debug_assert_paint();
 
         let scale_factor = self.scale_factor();
@@ -3291,10 +3267,6 @@ impl Window {
             corner_radii,
             tile,
             opacity,
-            smoothness: amount.clamp(0.0, 1.0),
-            pad2: 0,
-            pad3: 0,
-            pad4: 0,
         });
         Ok(())
     }
@@ -3317,6 +3289,117 @@ impl Window {
             content_mask,
             image_buffer,
         });
+    }
+
+    /// Create a custom GPU pipeline for drawing with user-provided shaders and vertex layouts.
+    pub fn create_custom_pipeline(&mut self, desc: CustomPipelineDesc) -> Result<CustomPipelineId> {
+        crate::custom_draw::validate_custom_pipeline_desc(&desc)?;
+        let Some(registry) = self.platform_window.custom_draw_registry() else {
+            return Err(anyhow!("custom draw pipeline not supported on this platform"));
+        };
+        registry.create_pipeline(desc)
+    }
+
+    /// Create a custom buffer for GPU-backed drawing.
+    pub fn create_custom_buffer(&mut self, desc: CustomBufferDesc) -> Result<CustomBufferId> {
+        let Some(registry) = self.platform_window.custom_draw_registry() else {
+            return Err(anyhow!("custom draw buffers not supported on this platform"));
+        };
+        registry.create_buffer(desc)
+    }
+
+    /// Update a previously created custom buffer.
+    pub fn update_custom_buffer(&mut self, id: CustomBufferId, data: Arc<[u8]>) -> Result<()> {
+        let Some(registry) = self.platform_window.custom_draw_registry() else {
+            return Err(anyhow!("custom draw buffers not supported on this platform"));
+        };
+        registry.update_buffer(id, data)
+    }
+
+    /// Remove a previously created custom buffer.
+    pub fn remove_custom_buffer(&mut self, id: CustomBufferId) -> Result<()> {
+        let Some(registry) = self.platform_window.custom_draw_registry() else {
+            return Err(anyhow!("custom draw buffers not supported on this platform"));
+        };
+        registry.remove_buffer(id);
+        Ok(())
+    }
+
+    /// Create a custom texture for GPU-backed drawing.
+    pub fn create_custom_texture(&mut self, desc: CustomTextureDesc) -> Result<CustomTextureId> {
+        let Some(registry) = self.platform_window.custom_draw_registry() else {
+            return Err(anyhow!("custom draw textures not supported on this platform"));
+        };
+        registry.create_texture(desc)
+    }
+
+    /// Update a previously created custom texture.
+    pub fn update_custom_texture(
+        &mut self,
+        id: CustomTextureId,
+        data: Arc<[u8]>,
+    ) -> Result<()> {
+        let Some(registry) = self.platform_window.custom_draw_registry() else {
+            return Err(anyhow!("custom draw textures not supported on this platform"));
+        };
+        registry.update_texture(id, data)
+    }
+
+    /// Remove a previously created custom texture.
+    pub fn remove_custom_texture(&mut self, id: CustomTextureId) -> Result<()> {
+        let Some(registry) = self.platform_window.custom_draw_registry() else {
+            return Err(anyhow!("custom draw textures not supported on this platform"));
+        };
+        registry.remove_texture(id);
+        Ok(())
+    }
+
+    /// Create a custom sampler for GPU-backed drawing.
+    pub fn create_custom_sampler(&mut self, desc: CustomSamplerDesc) -> Result<CustomSamplerId> {
+        let Some(registry) = self.platform_window.custom_draw_registry() else {
+            return Err(anyhow!("custom draw samplers not supported on this platform"));
+        };
+        registry.create_sampler(desc)
+    }
+
+    /// Remove a previously created custom sampler.
+    pub fn remove_custom_sampler(&mut self, id: CustomSamplerId) -> Result<()> {
+        let Some(registry) = self.platform_window.custom_draw_registry() else {
+            return Err(anyhow!("custom draw samplers not supported on this platform"));
+        };
+        registry.remove_sampler(id);
+        Ok(())
+    }
+
+    /// Paint a custom draw command into the scene.
+    pub fn paint_custom(&mut self, params: CustomDrawParams) -> Result<()> {
+        self.invalidator.debug_assert_paint();
+
+        let scale_factor = self.scale_factor();
+        let content_mask = self.content_mask();
+        let bounds = params.bounds.scale(scale_factor);
+        let content_mask = content_mask.scale(scale_factor);
+        let bindings_hash = params
+            .bindings
+            .iter()
+            .fold(1469598103934665603u64, |hash, binding| {
+                hash.wrapping_mul(1099511628211) ^ binding.hash()
+            });
+        self.next_frame.scene.insert_primitive(CustomDraw {
+            order: 0,
+            bounds,
+            content_mask,
+            pipeline: params.pipeline,
+            vertex_buffers: params.vertex_buffers,
+            vertex_count: params.vertex_count,
+            instance_count: params.instance_count,
+            bindings: params.bindings,
+            batch_key: CustomBatchKey {
+                pipeline: params.pipeline,
+                bindings_hash,
+            },
+        });
+        Ok(())
     }
 
     /// Removes an image from the sprite atlas.
@@ -5211,8 +5294,6 @@ pub struct PaintQuad {
     pub border_color: Hsla,
     /// The style of the quad's borders.
     pub border_style: BorderStyle,
-    /// The smoothness of the corners (0.0 = circle, 0.5 = squircle, 1.0 = square).
-    pub smoothness: f32,
 }
 
 impl PaintQuad {
@@ -5247,15 +5328,6 @@ impl PaintQuad {
             ..self
         }
     }
-
-    /// Sets superellipse corner amount (0.0 = circular, 0.5 = squircle, 1.0 = square-ish).
-    pub fn corner_superellipse(self, amount: f32) -> Self {
-        PaintQuad {
-            smoothness: amount.clamp(0.0, 1.0),
-            ..self
-        }
-    }
-
 }
 
 /// Creates a quad with the given parameters.
@@ -5274,7 +5346,6 @@ pub fn quad(
         border_widths: border_widths.into(),
         border_color: border_color.into(),
         border_style,
-        smoothness: 0.0,
     }
 }
 
@@ -5287,7 +5358,6 @@ pub fn fill(bounds: impl Into<Bounds<Pixels>>, background: impl Into<Background>
         border_widths: (0.).into(),
         border_color: transparent_black(),
         border_style: BorderStyle::default(),
-        smoothness: 0.0,
     }
 }
 
@@ -5304,6 +5374,5 @@ pub fn outline(
         border_widths: (1.).into(),
         border_color: border_color.into(),
         border_style,
-        smoothness: 0.0,
     }
 }

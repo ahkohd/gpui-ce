@@ -1,11 +1,11 @@
 // Doing `if let` gives you nice scoping with passes/encoders
 #![allow(irrefutable_let_patterns)]
 
-use super::{BladeAtlas, BladeContext};
+use super::{BladeAtlas, BladeContext, BladeCustomDrawRegistry, CustomBindings};
 use crate::{
-    Background, Bounds, ContentMask, CustomBufferSource, DevicePixels, Edges, GpuSpecs,
-    MonochromeSprite, Path, Point, PolychromeSprite, PrimitiveBatch, Quad, ScaledPixels, Scene,
-    Shadow, Size, Underline, get_gamma_correction_ratios,
+    Background, Bounds, CustomBufferSource, DevicePixels, GpuSpecs, MonochromeSprite, Path, Point,
+    PolychromeSprite, PrimitiveBatch, Quad, ScaledPixels, Scene, Shadow, Size, Underline,
+    get_gamma_correction_ratios,
 };
 use blade_graphics as gpu;
 use blade_util::{BufferBelt, BufferBeltDescriptor};
@@ -44,45 +44,9 @@ impl From<Bounds<ScaledPixels>> for PodBounds {
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
-struct PodEdges {
-    top: f32,
-    right: f32,
-    bottom: f32,
-    left: f32,
-}
-
-impl From<Edges<ScaledPixels>> for PodEdges {
-    fn from(edges: Edges<ScaledPixels>) -> Self {
-        Self {
-            top: edges.top.0,
-            right: edges.right.0,
-            bottom: edges.bottom.0,
-            left: edges.left.0,
-        }
-    }
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
-struct PodContentMask {
-    bounds: PodBounds,
-    fade_out: PodEdges,
-}
-
-impl From<ContentMask<ScaledPixels>> for PodContentMask {
-    fn from(mask: ContentMask<ScaledPixels>) -> Self {
-        Self {
-            bounds: mask.bounds.into(),
-            fade_out: mask.fade_out.into(),
-        }
-    }
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
 struct SurfaceParams {
     bounds: PodBounds,
-    content_mask: PodContentMask,
+    content_mask: PodBounds,
 }
 
 #[derive(blade_macros::ShaderData)]
@@ -371,6 +335,7 @@ pub struct BladeRenderer {
     instance_belt: BufferBelt,
     atlas: Arc<BladeAtlas>,
     atlas_sampler: gpu::Sampler,
+    custom_draw: Arc<BladeCustomDrawRegistry>,
     #[cfg(target_os = "macos")]
     core_video_texture_cache: CVMetalTextureCache,
     path_intermediate_texture: gpu::Texture,
@@ -421,6 +386,10 @@ impl BladeRenderer {
             min_filter: gpu::FilterMode::Linear,
             ..Default::default()
         });
+        let custom_draw = Arc::new(BladeCustomDrawRegistry::new(
+            Arc::clone(&context.gpu),
+            surface.info(),
+        ));
 
         let (path_intermediate_texture, path_intermediate_texture_view) =
             create_path_intermediate_texture(
@@ -457,6 +426,7 @@ impl BladeRenderer {
             instance_belt,
             atlas,
             atlas_sampler,
+            custom_draw,
             #[cfg(target_os = "macos")]
             core_video_texture_cache,
             path_intermediate_texture,
@@ -575,6 +545,10 @@ impl BladeRenderer {
         &self.atlas
     }
 
+    pub fn custom_draw_registry(&self) -> Arc<BladeCustomDrawRegistry> {
+        Arc::clone(&self.custom_draw)
+    }
+
     #[cfg_attr(target_os = "macos", allow(dead_code))]
     pub fn gpu_specs(&self) -> GpuSpecs {
         let info = self.gpu.device_information();
@@ -661,6 +635,7 @@ impl BladeRenderer {
     pub fn destroy(&mut self) {
         self.wait_for_gpu();
         self.atlas.destroy();
+        self.custom_draw.destroy();
         self.gpu.destroy_sampler(self.atlas_sampler);
         self.instance_belt.destroy(&self.gpu);
         self.gpu.destroy_command_encoder(&mut self.command_encoder);
@@ -680,6 +655,7 @@ impl BladeRenderer {
     pub fn draw(&mut self, scene: &Scene) {
         self.command_encoder.start();
         self.atlas.before_frame(&mut self.command_encoder);
+        self.custom_draw.before_frame(&mut self.command_encoder);
 
         let frame = {
             profiling::scope!("acquire frame");
@@ -927,7 +903,7 @@ impl BladeRenderer {
                                     globals,
                                     surface_locals: SurfaceParams {
                                         bounds: surface.bounds.into(),
-                                        content_mask: surface.content_mask.into(),
+                                        content_mask: surface.content_mask.bounds.into(),
                                     },
                                     t_y,
                                     t_cb_cr,
@@ -957,7 +933,9 @@ impl BladeRenderer {
  
                         if let Some(()) = self.custom_draw.with_pipeline(
                             pipeline_id,
-                            |pipeline, binding_kinds, binding_indices| {
+                            |pipeline,
+                             binding_kinds: &[Vec<CustomBindingKind>],
+                             binding_indices: &[Vec<Option<usize>>]| {
                                 let mut encoder = pass.with(pipeline);
                                 let mut max_index = 0usize;
                                 for indices in binding_indices {
@@ -1059,6 +1037,7 @@ impl BladeRenderer {
         profiling::scope!("finish");
         self.instance_belt.flush(&sync_point);
         self.atlas.after_frame(&sync_point);
+        self.custom_draw.after_frame(&sync_point);
 
         self.wait_for_gpu();
         self.last_sync_point = Some(sync_point);
