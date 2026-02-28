@@ -616,8 +616,6 @@ dependencies = [
 [[package]]
 name = "blade-graphics"
 version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e4deb8f595ce7f00dee3543ebf6fd9a20ea86fc421ab79600dac30876250bdae"
 dependencies = [
  "ash",
  "ash-window",

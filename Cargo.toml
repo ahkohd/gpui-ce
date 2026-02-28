@@ -303,6 +303,7 @@ naga = { version = "25.0", features = ["wgsl-in"] }
 
 [patch.crates-io]
 calloop = { git = "https://github.com/zed-industries/calloop" }
+blade-graphics = { path = "vendor/blade-graphics" }
 
 # ============================================================================
 # Learn Examples - Educational examples for learning GPUI
@@ -331,6 +332,34 @@ path = "examples/learn/async_tasks.rs"
 [[example]]
 name = "custom_drawing"
 path = "examples/learn/custom_drawing.rs"
+
+[[example]]
+name = "custom_draw_api"
+path = "examples/learn/custom_draw_api.rs"
+
+[[example]]
+name = "custom_draw_api_animated"
+path = "examples/learn/custom_draw_api_animated.rs"
+
+[[example]]
+name = "custom_draw_api_instanced"
+path = "examples/learn/custom_draw_api_instanced.rs"
+
+[[example]]
+name = "custom_draw_api_conformance"
+path = "examples/learn/custom_draw_api_conformance.rs"
+
+[[example]]
+name = "custom_draw_api_mixed"
+path = "examples/learn/custom_draw_api_mixed.rs"
+
+[[example]]
+name = "custom_draw_api_multi_group"
+path = "examples/learn/custom_draw_api_multi_group.rs"
+
+[[example]]
+name = "custom_draw_api_missing_binding"
+path = "examples/learn/custom_draw_api_missing_binding.rs"
 
 [[example]]
 name = "animation"
