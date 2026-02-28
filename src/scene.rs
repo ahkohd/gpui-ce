@@ -495,6 +495,8 @@ pub(crate) enum PrimitiveBatch<'a> {
 
 #[derive(Default, Debug, Clone)]
 #[repr(C)]
+#[derive(Default, Debug, Clone)]
+#[repr(C)]
 pub(crate) struct Quad {
     pub order: DrawOrder,
     pub border_style: BorderStyle,
