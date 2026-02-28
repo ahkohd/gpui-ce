@@ -248,9 +248,6 @@ pub struct Style {
     #[refineable]
     pub corner_radii: Corners<AbsoluteLength>,
 
-    /// The smoothness of corners (0.0 = circle, 0.5 = squircle, 1.0 = square)
-    pub smoothness: Option<f32>,
-
     /// Box shadow of the element
     pub box_shadow: Vec<BoxShadow>,
 
@@ -644,17 +641,14 @@ impl Style {
                 None => Hsla::default(),
             };
             border_color.a = 0.;
-            window.paint_quad(
-                quad(
-                    bounds,
-                    corner_radii,
-                    background_color.unwrap_or_default(),
-                    Edges::default(),
-                    border_color,
-                    self.border_style,
-                )
-                .corner_superellipse(self.smoothness.unwrap_or(0.0)),
-            );
+            window.paint_quad(quad(
+                bounds,
+                corner_radii,
+                background_color.unwrap_or_default(),
+                Edges::default(),
+                border_color,
+                self.border_style,
+            ));
         }
 
         continuation(window, cx);
@@ -690,8 +684,7 @@ impl Style {
                 border_widths,
                 self.border_color.unwrap_or_default(),
                 self.border_style,
-            )
-            .corner_superellipse(self.smoothness.unwrap_or(0.0));
+            );
 
             window.with_content_mask(Some(ContentMask { bounds: top_bounds }), |window| {
                 window.paint_quad(quad.clone());
@@ -772,7 +765,6 @@ impl Default for Style {
             border_color: None,
             border_style: BorderStyle::default(),
             corner_radii: Corners::default(),
-            smoothness: None,
             box_shadow: Default::default(),
             text: TextStyleRefinement::default(),
             mouse_cursor: None,
