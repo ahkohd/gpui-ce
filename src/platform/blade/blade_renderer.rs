@@ -3,9 +3,9 @@
 
 use super::{BladeAtlas, BladeContext, BladeCustomDrawRegistry, CustomBindings};
 use crate::{
-    Background, Bounds, CustomBufferSource, DevicePixels, GpuSpecs, MonochromeSprite, Path, Point,
-    PolychromeSprite, PrimitiveBatch, Quad, ScaledPixels, Scene, Shadow, Size, Underline,
-    get_gamma_correction_ratios,
+    Background, Bounds, CustomBindingKind, CustomBufferSource, DevicePixels, GpuSpecs,
+    MonochromeSprite, Path, Point, PolychromeSprite, PrimitiveBatch, Quad, ScaledPixels, Scene,
+    Shadow, Size, Underline, get_gamma_correction_ratios,
 };
 use blade_graphics as gpu;
 use blade_util::{BufferBelt, BufferBeltDescriptor};
